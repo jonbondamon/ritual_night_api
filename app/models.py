@@ -1,8 +1,16 @@
 from sqlalchemy import create_engine,Column, Integer, String, Boolean, ForeignKey, Date, UniqueConstraint, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import relationship, declarative_base, sessionmaker
 
 Base = declarative_base()
+
+class Stat(Base):
+    __tablename__ = 'stats'
+    stats_id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False, unique=True)
+    minigames_completed = Column(Integer, default=0)
+    games_won = Column(Integer, default=0)
+    rituals_completed = Column(Integer, default=0)
+    user = relationship("User", back_populates="stats")
 
 class User(Base):
     __tablename__ = 'users'
@@ -10,11 +18,20 @@ class User(Base):
     username = Column(String(255), nullable=False)
     email = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
-    stats = relationship("Stat", back_populates="user", uselist=False, default=lambda: Stat(games_played=0, games_won=0, rituals_completed=0))
+    stats = relationship("Stat", back_populates="user", uselist=False)
     user_items = relationship("UserItem", back_populates="user")
     xp_boosters = relationship("XPBooster", back_populates="user")
     referrals_made = relationship("Referral", foreign_keys="[Referral.referrer_user_id]", back_populates="referrer")
     referrals_received = relationship("Referral", foreign_keys="[Referral.referred_user_id]", back_populates="referred")
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.stats:
+            self.stats = Stat()
+
+class Token(Base):
+    __tablename__ = 'tokens'
+    jti = Column(String, primary_key=True)
 
 class Item(Base):
     __tablename__ = 'items'
@@ -25,10 +42,14 @@ class Item(Base):
     gold_cost = Column(Integer)
     rarity_id = Column(Integer, ForeignKey('rarity_types.rarity_id'), nullable=False)
     unity_name = Column(String(255), nullable=False, unique=True)
+    is_general_store_item = Column(Boolean, default=False, nullable=False)
     user_items = relationship("UserItem", back_populates="item")
+    item_type = relationship("ItemType", back_populates="items")
     chromas = relationship("Chroma", back_populates="item")
     shaders = relationship("Shader", back_populates="item")
     items_level_progression = relationship("ItemsLevelProgression", back_populates="item")
+    rarity = relationship("RarityType", back_populates="items")
+    item_bundles = relationship("BundleItemAssociation", back_populates="item")
 
 class ItemType(Base):
     __tablename__ = 'item_types'
@@ -49,7 +70,6 @@ class UserItem(Base):
     item_id = Column(Integer, ForeignKey('items.item_id'), nullable=False)
     item_level = Column(Integer, default=1)
     item_xp = Column(Integer, default=0)
-    is_obtained = Column(Boolean, nullable=False)
     is_equipped = Column(Boolean, nullable=False)
     prestige_level = Column(Integer, default=0)
     selected_chroma_id = Column(Integer, ForeignKey('chromas.chroma_id'))
@@ -96,15 +116,6 @@ class Shader(Base):
     item = relationship("Item", back_populates="shaders")
     user_items = relationship("UserItem", back_populates="selected_shader")
 
-class Stat(Base):
-    __tablename__ = 'stats'
-    stats_id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.user_id'), nullable=False, unique=True)
-    minigames_completed = Column(Integer, default=0)
-    games_won = Column(Integer, default=0)
-    rituals_completed = Column(Integer, default=0)
-    user = relationship("User", back_populates="stats")
-
 class XPBooster(Base):
     __tablename__ = 'xp_boosters'
     booster_id = Column(Integer, primary_key=True)
@@ -134,6 +145,23 @@ class Referral(Base):
     __table_args__ = (UniqueConstraint('referrer_user_id', 'referred_user_id'),)
     referrer = relationship("User", foreign_keys=[referrer_user_id], back_populates="referrals_made")
     referred = relationship("User", foreign_keys=[referred_user_id], back_populates="referrals_received")
+
+class ItemBundle(Base):
+    __tablename__ = 'item_bundles'
+    bundle_id = Column(Integer, primary_key=True)
+    bundle_name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    silver_price = Column(Integer, nullable=True)
+    gold_price = Column(Integer, nullable=True) 
+    bundle_items = relationship("BundleItemAssociation", back_populates="bundle")
+
+class BundleItemAssociation(Base):
+    __tablename__ = 'bundle_item_association'
+    association_id = Column(Integer, primary_key=True)
+    bundle_id = Column(Integer, ForeignKey('item_bundles.bundle_id'), nullable=False)
+    item_id = Column(Integer, ForeignKey('items.item_id'), nullable=False)
+    item = relationship("Item", back_populates="item_bundles")
+    bundle = relationship("ItemBundle", back_populates="bundle_items")
 
 # Need to change database to support ssl 
 engine = create_engine('postgresql://postgres:test@localhost:5432/rndb?sslmode=prefer', echo=False)
