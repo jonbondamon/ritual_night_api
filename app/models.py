@@ -190,7 +190,7 @@ class PremiumStoreSchedule(Base):
     __table_args__ = (UniqueConstraint('set_id', 'start_date', 'end_date'),)
     
 # Need to change database to support ssl 
-engine = create_engine('postgresql://postgres:test@localhost:5432/rndb?sslmode=prefer', echo=False)
+engine = create_engine('postgresql://citus:Bingchillingjoncena1!@c-database.n6nx6pijv2sml4.postgres.cosmos.azure.com:5432/rndb?sslmode=require', echo=False)
 Base.metadata.create_all(engine)
 
 Session = sessionmaker(bind=engine)

@@ -169,7 +169,7 @@ def authenticate_user():
 def get_user():
     """
     Get User
-    This endpoint returns the authenticated user's details, including their stats, items, money, and XP boosters.
+    This endpoint returns the authenticated user's details, including their stats, items, money, XP boosters, and general store items they don't own.
     ---
     tags:
       - User Management
@@ -218,6 +218,10 @@ def get_user():
               type: array
               items:
                 $ref: '#/definitions/XPBooster'
+            general_store_items:
+              type: array
+              items:
+                $ref: '#/definitions/GeneralStoreItem'
       404:
         description: User not found.
         examples:
@@ -272,12 +276,26 @@ def get_user():
           games_applied:
             type: integer
             description: The number of games the booster has been applied to.
+      GeneralStoreItem:
+        type: object
+        properties:
+          item_id:
+            type: integer
+            description: The item's ID.
+          item_name:
+            type: string
+            description: The item's name.
+          silver_cost:
+            type: integer
+            description: The silver cost of the item.
+          gold_cost:
+            type: integer
+            description: The gold cost of the item.
     """
     session = Session()
     try:
         # Use request.user_id to get the user ID from the token directly
         user_id = request.user_id
-
         # Query the database for the authenticated user
         user = session.query(User).filter(User.user_id == user_id).first()
         if user:
@@ -287,7 +305,6 @@ def get_user():
                 'games_won': user.stats.games_won if user.stats else 0,
                 'rituals_completed': user.stats.rituals_completed if user.stats else 0,
             }
-
             # Serialize user items
             items_info = [
                 {
@@ -303,7 +320,6 @@ def get_user():
                 }
                 for item in user.user_items
             ] if user.user_items else []
-
             # Serialize XP boosters
             xp_boosters_info = [
                 {
@@ -314,8 +330,25 @@ def get_user():
                 }
                 for booster in user.xp_boosters
             ] if user.xp_boosters else []
-
-            # Construct a response object with user details, including stats, items, money, and XP boosters
+            # Get the item IDs of the items the user owns
+            user_item_ids = [item.item_id for item in user.user_items]
+            # Query the general store items that the user does not own
+            general_store_items = session.query(Item).filter(
+                Item.is_general_store_item == True,
+                ~Item.item_id.in_(user_item_ids)
+            ).all()
+            # Serialize general store items
+            general_store_items_info = [
+                {
+                    'item_id': item.item_id,
+                    'item_name': item.item_name,
+                    'silver_cost': item.silver_cost,
+                    'gold_cost': item.gold_cost,
+                    'unity_name': item.unity_name,
+                }
+                for item in general_store_items
+            ]
+            # Construct a response object with user details, including stats, items, money, XP boosters, and general store items
             user_details = {
                 'user_id': user.user_id,
                 'username': user.username,
@@ -325,8 +358,8 @@ def get_user():
                 'stats': stats_info,
                 'items': items_info,
                 'xp_boosters': xp_boosters_info,
+                'general_store_items': general_store_items_info,
             }
-
             return jsonify(user_details), 200
         else:
             return jsonify({'error': 'User not found'}), 404
@@ -334,7 +367,6 @@ def get_user():
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()
-
 
 @user_management.route('/user/update/info', methods=['PUT'])
 @user_role_required  
