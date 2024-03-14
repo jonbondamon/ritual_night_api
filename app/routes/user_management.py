@@ -1,7 +1,6 @@
-from app.routes import SECRET_KEY, ALGORITHM, user_role_required
-from sqlalchemy import select
+from app.routes import SECRET_KEY, ALGORITHM, user_role_required, admin_role_required
 from flask import Blueprint, request, jsonify
-from app.models import Session, User, Token, Stat, UserItem, Item
+from app.models import Session, User, Token, Stat, UserItem, Item, Referral, XPBooster
 import bcrypt, datetime, jwt, uuid
 
 user_management = Blueprint('user_management', __name__, url_prefix='/api')
@@ -165,12 +164,12 @@ def authenticate_user():
     finally:
         session.close()
 
-@user_management.route('/user', methods=['GET']) 
+@user_management.route('/user', methods=['GET'])
 @user_role_required
 def get_user():
     """
     Get User
-    This endpoint returns the authenticated user's details.
+    This endpoint returns the authenticated user's details, including their stats, items, money, and XP boosters.
     ---
     tags:
       - User Management
@@ -193,12 +192,18 @@ def get_user():
             email:
               type: string
               description: The user's email.
+            gold_amount:
+              type: integer
+              description: The amount of gold the user has.
+            silver_amount:
+              type: integer
+              description: The amount of silver the user has.
             stats:
               type: object
               properties:
-                games_played:
+                minigames_completed:
                   type: integer
-                  description: The number of games the user has played.
+                  description: The number of mini-games the user has completed.
                 games_won:
                   type: integer
                   description: The number of games the user has won.
@@ -209,6 +214,10 @@ def get_user():
               type: array
               items:
                 $ref: '#/definitions/Item'
+            xp_boosters:
+              type: array
+              items:
+                $ref: '#/definitions/XPBooster'
       404:
         description: User not found.
         examples:
@@ -248,6 +257,21 @@ def get_user():
           is_equipped:
             type: boolean
             description: Whether the item is equipped.
+      XPBooster:
+        type: object
+        properties:
+          booster_id:
+            type: integer
+            description: The booster's ID.
+          booster_effect:
+            type: integer
+            description: The effect of the booster.
+          is_active:
+            type: boolean
+            description: Whether the booster is currently active.
+          games_applied:
+            type: integer
+            description: The number of games the booster has been applied to.
     """
     session = Session()
     try:
@@ -280,13 +304,27 @@ def get_user():
                 for item in user.user_items
             ] if user.user_items else []
 
-            # Construct a response object with user details, including stats and items
+            # Serialize XP boosters
+            xp_boosters_info = [
+                {
+                    'booster_id': booster.booster_id,
+                    'booster_effect': booster.booster_effect,
+                    'is_active': booster.is_active,
+                    'games_applied': booster.games_applied,
+                }
+                for booster in user.xp_boosters
+            ] if user.xp_boosters else []
+
+            # Construct a response object with user details, including stats, items, money, and XP boosters
             user_details = {
                 'user_id': user.user_id,
                 'username': user.username,
                 'email': user.email,
+                'gold_amount': user.gold_amount,
+                'silver_amount': user.silver_amount,
                 'stats': stats_info,
                 'items': items_info,
+                'xp_boosters': xp_boosters_info,
             }
 
             return jsonify(user_details), 200
@@ -296,6 +334,7 @@ def get_user():
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()
+
 
 @user_management.route('/user/update/info', methods=['PUT'])
 @user_role_required  
@@ -554,12 +593,12 @@ def update_user_stats():
     finally:
         session.close()
 
-@user_management.route('/user/store/general/items', methods=['GET'])
-@user_role_required
-def get_store_items():
+@user_management.route('/users', methods=['GET'])
+@admin_role_required
+def get_all_users():
     """
-    Get Store Items 
-    This endpoint returns the items available in the general store that are not owned by the authenticated user.
+    (ADMIN ONLY) Get All Users 
+    This endpoint returns all users in the system. Access is restricted to administrators only.
     ---
     tags:
       - User Management
@@ -571,63 +610,445 @@ def get_store_items():
       - application/json
     responses:
       200:
-        description: Store items fetched successfully.
+        description: Users fetched successfully.
         schema:
           type: array
           items:
-            $ref: '#/definitions/StoreItem'
+            $ref: '#/definitions/User'
       500:
         description: Internal server error.
         examples:
           application/json: {"error": "An unexpected error occurred"}
     definitions:
-      StoreItem:
+      User:
+        type: object
+        properties:
+          user_id:
+            type: integer
+            description: The user's ID.
+          username:
+            type: string
+            description: The user's username.
+          email:
+            type: string
+            description: The user's email.
+    """
+    session = Session()
+    try:
+        users = session.query(User).all()
+        users_data = [
+            {
+                'user_id': user.user_id,
+                'username': user.username,
+                'email': user.email,
+            }
+            for user in users
+        ]
+        return jsonify(users_data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@user_management.route('/users/<int:user_id>', methods=['GET'])
+@admin_role_required
+def get_user_by_id(user_id):
+    """
+    (ADMIN ONLY) Get User By ID
+    This endpoint returns the user with the specified ID. Access is restricted to administrators only.
+    ---
+    tags:
+      - User Management
+    security:
+      - Bearer: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        required: true
+        type: integer
+        description: The ID of the user to fetch.
+    responses:
+      200:
+        description: User fetched successfully.
+        schema:
+          type: object
+          $ref: '#/definitions/User'
+      404:
+        description: User not found.
+        examples:
+          application/json: {"error": "User not found"}
+      500:
+        description: Internal server error.
+        examples:
+          application/json: {"error": "An unexpected error occurred"}
+    definitions:
+      User:
+        type: object
+        properties:
+          user_id:
+            type: integer
+            description: The user's ID.
+          username:
+            type: string
+            description: The user's username.
+          email:
+            type: string
+            description: The user's email.
+    """
+    session = Session()
+    try:
+        user = session.query(User).filter_by(user_id=user_id).first()
+        if user:
+            user_data = {
+                'user_id': user.user_id,
+                'username': user.username,
+                'email': user.email,
+            }
+            return jsonify(user_data), 200
+        else:
+            return jsonify({'error': 'User not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@user_management.route('/users/<int:user_id>', methods=['DELETE'])
+@admin_role_required
+def delete_user(user_id):
+    """
+    (ADMIN ONLY) Delete User
+    This endpoint deletes the user with the specified ID. Access is restricted to administrators only.
+    ---
+    tags:
+      - User Management
+    security:
+      - Bearer: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        required: true
+        type: integer
+        description: The ID of the user to delete.
+    responses:
+      200:
+        description: User deleted successfully.
+        examples:
+          application/json: {"success": "User deleted successfully"}
+      404:
+        description: User not found.
+        examples:
+          application/json: {"error": "User not found"}
+      500:
+        description: Internal server error.
+        examples:
+          application/json: {"error": "An unexpected error occurred"}
+    """
+    session = Session()
+    try:
+        user = session.query(User).filter_by(user_id=user_id).first()
+        if user:
+            session.delete(user)
+            session.commit()
+            return jsonify({'success': 'User deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'User not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@user_management.route('/users/<int:user_id>/items', methods=['GET'])
+@user_role_required
+def get_user_items(user_id):
+    """
+    Get User Items
+    This endpoint returns the items owned by the user with the specified ID.
+    ---
+    tags:
+      - User Management
+    security:
+      - Bearer: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        required: true
+        type: integer
+        description: The ID of the user whose items to fetch.
+    responses:
+      200:
+        description: User items fetched successfully.
+        schema:
+          type: array
+          items:
+            $ref: '#/definitions/UserItem'
+      500:
+        description: Internal server error.
+        examples:
+          application/json: {"error": "An unexpected error occurred"}
+    definitions:
+      UserItem:
         type: object
         properties:
           item_id:
             type: integer
-            description: The unique identifier of the item.
-          item_name:
-            type: string
-            description: The name of the item.
-          silver_cost:
+            description: The item's ID.
+          item_level:
             type: integer
-            description: The cost of the item in silver.
-          gold_cost:
+            description: The item's level.
+          item_xp:
             type: integer
-            description: The cost of the item in gold.
-          unity_name:
-            type: string
-            description: The name of the item's unity.
-          is_general_store_item:
+            description: The item's XP.
+          is_equipped:
             type: boolean
-            description: Indicates if the item is available in the general store.
+            description: Whether the item is equipped.
+          prestige_level:
+            type: integer
+            description: The item's prestige level.
+          selected_chroma_id:
+            type: integer
+            description: The selected chroma ID for the item.
+          selected_shader_id:
+            type: integer
+            description: The selected shader ID for the item.
+          favorite:
+            type: boolean
+            description: Whether the item is a favorite.
     """
     session = Session()
     try:
-        user_id = request.user_id  # Obtained from the JWT token after @user_role_required decorator
-
-        # Query for items that are in the general store but not owned by the user
-        user_owned_item_ids_query = select(UserItem.item_id).filter(UserItem.user_id == user_id)
-        
-        # Fetch store items not owned by the user
-        items = session.query(Item).filter(
-            Item.is_general_store_item == True, 
-            ~Item.item_id.in_(user_owned_item_ids_query)
-        ).all()
-
-        items_list = [
+        user_items = session.query(UserItem).filter_by(user_id=user_id).all()
+        items_data = [
             {
                 'item_id': item.item_id,
-                'item_name': item.item_name,
-                'silver_cost': item.silver_cost,
-                'gold_cost': item.gold_cost,
-                'unity_name': item.unity_name,
-                'is_general_store_item': item.is_general_store_item
-            } for item in items
+                'item_level': item.item_level,
+                'item_xp': item.item_xp,
+                'is_equipped': item.is_equipped,
+                'prestige_level': item.prestige_level,
+                'selected_chroma_id': item.selected_chroma_id,
+                'selected_shader_id': item.selected_shader_id,
+                'favorite': item.favorite
+            }
+            for item in user_items
         ]
+        return jsonify(items_data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
 
-        return jsonify(items_list), 200
+@user_management.route('/users/<int:user_id>/stats', methods=['GET'])
+@user_role_required
+def get_user_stats(user_id):
+    """
+    Get User Stats
+    This endpoint returns the stats of the user with the specified ID.
+    ---
+    tags:
+      - User Management
+    security:
+      - Bearer: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        required: true
+        type: integer
+        description: The ID of the user whose stats to fetch.
+    responses:
+      200:
+        description: User stats fetched successfully.
+        schema:
+          type: object
+          properties:
+            minigames_completed:
+              type: integer
+              description: The total number of minigames completed by the user.
+            games_won:
+              type: integer
+              description: The total number of games won by the user.
+            rituals_completed:
+              type: integer
+              description: The number of rituals the user has completed.
+          404:
+            description: User stats not found.
+            examples:
+              application/json: {"error": "User stats not found"}
+          500:
+            description: Internal server error.
+            examples:
+              application/json: {"error": "An unexpected error occurred"}
+    """
+    session = Session()
+    try:
+        user_stats = session.query(Stat).filter_by(user_id=user_id).first()
+        if user_stats:
+            stats_data = {
+                'minigames_completed': user_stats.minigames_completed,
+                'games_won': user_stats.games_won,
+                'rituals_completed': user_stats.rituals_completed
+            }
+            return jsonify(stats_data), 200
+        else:
+            return jsonify({'error': 'User stats not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@user_management.route('/users/<int:user_id>/referrals', methods=['GET'])
+@user_role_required
+def get_user_referrals(user_id):
+    """
+    Get User Referrals
+    This endpoint returns the referrals made by the user with the specified ID.
+    ---
+    tags:
+      - User Management
+    security:
+      - Bearer: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        required: true
+        type: integer
+        description: The ID of the user whose referrals to fetch.
+    responses:
+      200:
+        description: User referrals fetched successfully.
+        schema:
+          type: array
+          items:
+            $ref: '#/definitions/Referral'
+      500:
+        description: Internal server error.
+        examples:
+          application/json: {"error": "An unexpected error occurred"}
+    definitions:
+      Referral:
+        type: object
+        properties:
+          referral_id:
+            type: integer
+            description: The referral's ID.
+          referred_user_id:
+            type: integer
+            description: The ID of the user referred by the referrer.
+          games_played:
+            type: integer
+            description: The number of games played by the referred user.
+          reward_granted:
+            type: boolean
+            description: Whether the reward has been granted for this referral.
+          date_referred:
+            type: string
+            format: date-time
+            description: The date the user was referred.
+    """
+    session = Session()
+    try:
+        referrals = session.query(Referral).filter_by(referrer_user_id=user_id).all()
+        referrals_data = [
+            {
+                'referral_id': referral.referral_id,
+                'referred_user_id': referral.referred_user_id,
+                'games_played': referral.games_played,
+                'reward_granted': referral.reward_granted,
+                'date_referred': referral.date_referred.isoformat()
+            }
+            for referral in referrals
+        ]
+        return jsonify(referrals_data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@user_management.route('/users/<int:user_id>/xp-boosters', methods=['GET'])
+@user_role_required
+def get_user_xp_boosters(user_id):
+    """
+    Get User XP Boosters
+    This endpoint returns the XP boosters owned by the user with the specified ID.
+    ---
+    tags:
+      - User Management
+    security:
+      - Bearer: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: path
+        name: user_id
+        required: true
+        type: integer
+        description: The ID of the user whose XP boosters to fetch.
+    responses:
+      200:
+        description: User XP boosters fetched successfully.
+        schema:
+          type: array
+          items:
+            $ref: '#/definitions/XPBooster'
+      500:
+        description: Internal server error.
+        examples:
+          application/json: {"error": "An unexpected error occurred"}
+    definitions:
+      XPBooster:
+        type: object
+        properties:
+          booster_id:
+            type: integer
+            description: The booster's ID.
+          booster_type_id:
+            type: integer
+            description: The ID of the booster type.
+          booster_effect:
+            type: integer
+            description: The effect of the booster.
+          is_active:
+            type: boolean
+            description: Whether the booster is active.
+          games_applied:
+            type: integer
+            description: The number of games the booster has been applied to.
+    """
+
+    session = Session()
+    try:
+        xp_boosters = session.query(XPBooster).filter_by(user_id=user_id).all()
+        boosters_data = [
+            {
+                'booster_id': booster.booster_id,
+                'booster_type_id': booster.booster_type_id,
+                'booster_effect': booster.booster_effect,
+                'is_active': booster.is_active,
+                'games_applied': booster.games_applied
+            }
+            for booster in xp_boosters
+        ]
+        return jsonify(boosters_data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:

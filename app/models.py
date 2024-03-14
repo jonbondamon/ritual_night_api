@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine,Column, Integer, String, Boolean, ForeignKey, Date, UniqueConstraint, Text
+from sqlalchemy import create_engine,Column, Integer, String, Boolean, ForeignKey, Date, UniqueConstraint, Text, DateTime
 from sqlalchemy.orm import relationship, declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -18,6 +18,8 @@ class User(Base):
     username = Column(String(255), nullable=False)
     email = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
+    gold_amount = Column(Integer, default=0)  # Added column for gold amount
+    silver_amount = Column(Integer, default=0)  # Added column for silver amount
     stats = relationship("Stat", back_populates="user", uselist=False)
     user_items = relationship("UserItem", back_populates="user")
     xp_boosters = relationship("XPBooster", back_populates="user")
@@ -50,6 +52,7 @@ class Item(Base):
     items_level_progression = relationship("ItemsLevelProgression", back_populates="item")
     rarity = relationship("RarityType", back_populates="items")
     item_bundles = relationship("BundleItemAssociation", back_populates="item")
+    premium_store_sets = relationship("SetItemAssociation", back_populates="item")
 
 class ItemType(Base):
     __tablename__ = 'item_types'
@@ -163,6 +166,29 @@ class BundleItemAssociation(Base):
     item = relationship("Item", back_populates="item_bundles")
     bundle = relationship("ItemBundle", back_populates="bundle_items")
 
+class SetItemAssociation(Base):
+    __tablename__ = 'set_item_association'
+    association_id = Column(Integer, primary_key=True)
+    set_id = Column(Integer, ForeignKey('premium_store_sets.set_id'), nullable=False)
+    item_id = Column(Integer, ForeignKey('items.item_id'), nullable=False)
+    premium_store_set = relationship("PremiumStoreSet", back_populates="items")
+    item = relationship("Item", back_populates="premium_store_sets")
+
+
+class PremiumStoreSet(Base):
+    __tablename__ = 'premium_store_sets'
+    set_id = Column(Integer, primary_key=True)
+    set_name = Column(String(255), nullable=False, unique=True)
+    items = relationship("SetItemAssociation", back_populates="premium_store_set")
+
+class PremiumStoreSchedule(Base):
+    __tablename__ = 'premium_store_schedules'
+    schedule_id = Column(Integer, primary_key=True)
+    set_id = Column(Integer, ForeignKey('premium_store_sets.set_id'), nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    __table_args__ = (UniqueConstraint('set_id', 'start_date', 'end_date'),)
+    
 # Need to change database to support ssl 
 engine = create_engine('postgresql://postgres:test@localhost:5432/rndb?sslmode=prefer', echo=False)
 Base.metadata.create_all(engine)
